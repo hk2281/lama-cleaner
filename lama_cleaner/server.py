@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+from os import path
 import hashlib
 
 os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
@@ -52,17 +53,29 @@ from flask import (
 )
 from flask_socketio import SocketIO
 
+from huggingface_hub import hf_hub_download
+
+
 # Disable ability for Flask to display warning about using a development server in a production environment.
 # https://gist.github.com/jerblack/735b9953ba1ab6234abb43174210d356
 cli.show_server_banner = lambda *_: None
 from flask_cors import CORS
 
 from lama_cleaner.helper import (
+    get_mask,
     load_img,
     numpy_to_bytes,
     resize_max_size,
     pil_to_bytes,
+    add_watermark,
+    trim,
 )
+
+
+
+
+import ultralytics
+from ultralytics import YOLO
 
 NUM_THREADS = str(multiprocessing.cpu_count())
 
@@ -210,12 +223,25 @@ def media_thumbnail_file(tab, filename):
 
 @app.route("/inpaint", methods=["POST"])
 def process():
+    print('hi im here')
     input = request.files
     # RGB
     origin_image_bytes = input["image"].read()
-    image, alpha_channel, exif_infos = load_img(origin_image_bytes, return_exif=True)
 
-    mask, _ = load_img(input["mask"].read(), gray=True)
+
+    image, alpha_channel, exif_infos = load_img(origin_image_bytes, return_exif=True)
+    print(type(image),type(alpha_channel))
+    # получили изображение, построили маску отдали маску 
+    # функия поличит изображение np.array и модель
+    try:
+        factored_mask = get_mask(image,YOLO_model)
+        print('factored', factored_mask)
+    except AttributeError as e:
+        logger.exception(e)
+        return f"cant find bamper watermask {str(e)}", 500
+    
+
+    mask, _ = load_img(factored_mask, gray=True)
     mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)[1]
 
     if image.shape[:2] != mask.shape[:2]:
@@ -223,7 +249,7 @@ def process():
             f"Mask shape{mask.shape[:2]} not queal to Image shape{image.shape[:2]}",
             400,
         )
-
+    
     original_shape = image.shape
     interpolation = cv2.INTER_CUBIC
 
@@ -309,8 +335,18 @@ def process():
         res_np_img = np.concatenate(
             (res_np_img, alpha_channel[:, :, np.newaxis]), axis=-1
         )
-
+    # print('res_np_img', type(res_np_img))
     ext = get_image_ext(origin_image_bytes)
+
+    res_np_img = trim(res_np_img)
+    print(os.getcwd())
+    relative_path = os.path.join('lama_cleaner/watermark_img', 'wm.png')
+    print(relative_path)
+    res_np_img = add_watermark(
+                    target_image_path=res_np_img,
+                    watermark_image_path=cv2.imread(relative_path),
+                    opacity=30
+                    )
 
     bytes_io = io.BytesIO(
         pil_to_bytes(
@@ -524,9 +560,12 @@ def build_plugins(args):
         logger.info(f"Initialize GIF plugin")
         plugins[MakeGIF.name] = MakeGIF()
 
+import pickle 
 
 def main(args):
+
     global model
+    global YOLO_model
     global device
     global input_image_path
     global is_disable_model_switch
@@ -598,6 +637,18 @@ def main(args):
         callback=diffuser_callback,
     )
 
+    YOLO_model_path = hf_hub_download(repo_id="hk2281/bmp_wt", 
+                                        filename="yolo8n-seg-30e-32b-dv2.pt", 
+                                        token=os.environ.get('HG_TOKEN'),
+                                        cache_dir='yolo_model',
+                                        repo_type='model'
+                                    )
+
+    YOLO_model = YOLO(YOLO_model_path)
+
+
+    
+    
     if args.gui:
         app_width, app_height = args.gui_size
         from flaskwebgui import FlaskUI
@@ -620,3 +671,10 @@ def main(args):
             debug=args.debug,
             allow_unsafe_werkzeug=True,
         )
+
+
+
+if __name__ == '__main__':
+    with open('args.pkl','rb')as f:
+        args = pickle.loads(f.read())
+        main(args=args)

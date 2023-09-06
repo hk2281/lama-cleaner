@@ -5,13 +5,226 @@ from typing import List, Optional
 
 from urllib.parse import urlparse
 import cv2
-from PIL import Image, ImageOps, PngImagePlugin
+import math
+from PIL import Image, ImageOps, PngImagePlugin, ImageChops
 import numpy as np
 import torch
 from lama_cleaner.const import MPS_SUPPORT_MODELS
 from loguru import logger
 from torch.hub import download_url_to_file, get_dir
 import hashlib
+
+
+def find_intersection(p1, p2, q1, q2):
+    # p1 и p2 - координаты первого отрезка (p1 = (x1, y1), p2 = (x2, y2))
+    # q1 и q2 - координаты второго отрезка (q1 = (x3, y3), q2 = (x4, y4))
+
+    # Вычисляем векторы направления отрезков
+    vector1 = (p2[0] - p1[0], p2[1] - p1[1])
+    vector2 = (q2[0] - q1[0], q2[1] - q1[1])
+
+    # Вычисляем определитель матрицы из векторов направления
+    determinant = vector1[0] * vector2[1] - vector1[1] * vector2[0]
+
+    # Если определитель равен нулю, отрезки параллельны и не пересекаются
+    if determinant == 0:
+        return None
+
+    # Вычисляем параметры t и u для точки пересечения
+    t = ((q1[0] - p1[0]) * vector2[1] - (q1[1] - p1[1]) * vector2[0]) / determinant
+    u = ((q1[0] - p1[0]) * vector1[1] - (q1[1] - p1[1]) * vector1[0]) / determinant
+
+    # Если 0 <= t <= 1 и 0 <= u <= 1, то отрезки пересекаются
+    if 0 <= t <= 1 and 0 <= u <= 1:
+        intersection_x = p1[0] + t * vector1[0]
+        intersection_y = p1[1] + t * vector1[1]
+        return (intersection_x, intersection_y)
+    else:
+        return None
+
+
+def mask_line_extender(p1,p2,target_X, target_Y):
+  x1, y1 = p1
+  x2, y2 = p2
+  # X = 5 + (25 - 15) * (15 - 5) / (5 - 15)
+  X = x1 + (target_Y - y1) * (x2 - x1) / (y2 - y1)
+  X = 0 if X < 0 else X
+  # Y = 15 + (25 - 5) * (5 - 15) / (15 - 5)
+  Y = y1 + (target_X - x1) * (y2 - y1) / (x2 - x1)
+  Y = 0  if  Y < 0 else Y
+
+  print('ex',X,Y)
+  return (X,Y)
+
+def find_intersection_angle(p1,p2,q1,q2):
+    # Вычисляем векторы направления для отрезков
+    vector1 = (p2[0] - p1[0], p2[1] - p1[1])
+    vector2 = (q2[0] - q1[0], q2[1] - q1[1])
+
+    # Вычисляем скалярное произведение векторов
+    dot_product = vector1[0] * vector2[0] + vector1[1] * vector2[1]
+
+    # Вычисляем длины векторов
+    magnitude1 = math.sqrt(vector1[0] ** 2 + vector1[1] ** 2)
+    magnitude2 = math.sqrt(vector2[0] ** 2 + vector2[1] ** 2)
+
+    # Вычисляем угол между отрезками в радианах
+    angle_rad = math.acos(dot_product / (magnitude1 * magnitude2))
+
+    # Преобразуем угол в градусы
+    angle_deg = math.degrees(angle_rad)
+
+    print(f"Угол между отрезками: {90-angle_deg} градусов")
+    return 90-angle_deg
+
+
+def get_mask(img_path:np.array=None, model=None) -> None:
+
+  if img_path is None:
+    raise Exception('img path is empty set corrent img_path: arg')
+  if model is None:
+    raise Exception('passed model not fit here, set corrent model: arg')
+
+  pred_result = model(img_path)
+  yolo_contours = []
+  for r in pred_result:
+    yolo_img = r.orig_img
+    yolo_mask = r.masks.data
+    yolo_mask = yolo_mask.cpu().numpy().astype('uint8')
+    yolo_contour, _ = cv2.findContours(yolo_mask[0], cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE)
+    yolo_contours.append(yolo_contour[0])
+  result = np.zeros_like(yolo_img)
+  image_with_overlaid_predictions = yolo_img.copy()
+
+  for contour in yolo_contours:
+
+      print(type(contour),contour.shape)
+
+      direction = "vertical"  # или "horizontal" для горизонтального направления
+
+      x_min = contour[:, :, 0].min()
+      x_max = contour[:, :, 0].max()
+      y_min = contour[:, :, 1].min()
+      y_max = contour[:, :, 1].max()
+      mid_x = (x_min + x_max) // 2
+      mid_y = (y_min + y_max) // 2
+      cv2.line(image_with_overlaid_predictions, (mid_x-200, mid_y), (mid_x+200,mid_y), (255, 0, 0), 2)
+      print(x_min,y_min,x_max,y_max)
+      intersections = []
+
+      x1, y1 = mid_x-200, mid_y
+      x2, y2 = mid_x+200, mid_y
+
+      m = (y2 - y1) / (x2 - x1)
+      b = y1 - m * x1
+      print(m,b)
+      intersections = []
+
+      for i in range(len(contour) - 1):
+        try:
+          x1, y1 = contour[i][0]
+          x2, y2 = contour[i + 1][0]
+
+        except Exception as e:
+          print(e)
+        # print(x1,y1,x2,y2)
+
+        my_intersaction_points = find_intersection((mid_x-200, mid_y),(mid_x+200, mid_y),(x1,y1),(x2,y2))
+        if my_intersaction_points:
+          intersections.append(my_intersaction_points)
+
+      if len(intersections) > 1:
+        intersections = intersections[::len(intersections)-1]
+      for point in intersections:
+          print(f"Точка пересечения: ({point[0]}, {point[1]})")
+      intersection_angle = find_intersection_angle((mid_x-200, mid_y),(mid_x+200, mid_y),(x_min,y_max),(x_max,y_min))
+
+
+      # находим длинну проекции
+      # Длина проекции = |AB| * cos(θ)
+      # находим длинну отрезка
+      A = intersections[0]
+      B = intersections[1]
+      line_len = B[0]-A[0]
+      print('len',line_len)
+      # находим длинну проекции
+      projection_len = int(abs(abs(line_len)*math.cos(intersection_angle)))
+      print('roj. len', projection_len)
+      if projection_len <= 0:
+        projection_len=15
+      print("y_min",x_min)
+      cv2.line(result, (int(0),480), (0,480), (255, 150, 255), thickness=5)
+      extendet_X,extendet_Y = mask_line_extender((x_min,y_max),(x_max,y_min),yolo_img.shape[1],yolo_img.shape[0])
+      cv2.line(result, (x_min,y_max), (x_max,y_min), (255, 255, 255), thickness=projection_len+5)
+      cv2.line(result, (int(extendet_X),yolo_img.shape[0]), (yolo_img.shape[1],int(extendet_Y)), (255, 255, 255), thickness=projection_len+5)
+      cv2.drawContours(result, [contour],-1, (255,255,255),thickness=cv2.FILLED)
+      print('mask type', type(result))
+      return result
+
+
+def add_watermark(target_image_path=None, watermark_image_path=None, output_image_path=None, opacity=28):
+
+    # Открываем целевое и водяное изображения
+    target_image = Image.fromarray(np.uint8(target_image_path))
+    print(watermark_image_path)
+    # target_image = Image.open(target_image_path)
+    watermark_image_path = watermark_image_path[..., ::-1]
+    watermark_image = Image.fromarray(np.uint8(watermark_image_path))
+
+    # Определяем размеры целевого изображения
+    target_width, target_height = target_image.size
+
+    # Определяем соотношение масштабирования для водяного знака
+    scale_factor = min(target_width / watermark_image.width, target_height / watermark_image.height)
+
+    # Масштабируем водяной знак
+    new_width = int(watermark_image.width * scale_factor)
+    new_height = int(watermark_image.height * scale_factor)
+    watermark_image = watermark_image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+
+    # Рассчитываем прозрачность водяного знака
+    watermark_opacity = int((opacity /100) * 255)
+    watermark_image.putalpha(watermark_opacity)
+
+    # Создаем копию целевого изображения для редактирования
+    output_image = target_image.copy()
+
+    # Рассчитываем координаты для размещения водяного знака по центру
+    # x = (target_width - watermark_image.width) // 2
+    # y = (target_height - watermark_image.height) // 2
+    top_x = (target_width - watermark_image.width) // 2
+    top_y = target_height // 4 - watermark_image.height // 2
+
+    # Рассчитываем координаты для размещения среднего водяного знака
+    middle_x = (target_width - watermark_image.width) // 2
+    middle_y = (target_height - watermark_image.height) // 2
+
+    # Рассчитываем координаты для размещения нижнего водяного знака
+    bottom_x = (target_width - watermark_image.width) // 2
+    bottom_y = (3 * target_height) // 4 - watermark_image.height // 2
+    # watermark_image = watermark_image.rotate(45, expand=True)
+    # Наносим водяной знак на изображение
+    output_image.paste(watermark_image,(top_x,top_y),watermark_image)
+    output_image.paste(watermark_image,(middle_x,middle_y),watermark_image)
+    output_image.paste(watermark_image,(bottom_x,bottom_y),watermark_image)
+    # Сохраняем результат
+
+    # output_image.save(output_image_path)
+    
+    return(np.array(output_image))
+
+
+def trim(im):
+    im = Image.fromarray(np.uint8(im))
+    bg = Image.new(im.mode, im.size, im.getpixel((0,0)))
+    diff = ImageChops.difference(im, bg)
+    diff = ImageChops.add(diff, diff, 2.0, -100)
+    bbox = diff.getbbox()
+    if bbox:
+        return np.array(im.crop(bbox))
+    else:
+        # Failed to find the borders, convert to "RGB"
+        return np.array(trim(im.convert('RGB')))
 
 
 def md5sum(filename):
@@ -155,7 +368,11 @@ def pil_to_bytes(pil_img, ext: str, quality: int = 95, exif_infos={}) -> bytes:
 
 def load_img(img_bytes, gray: bool = False, return_exif: bool = False):
     alpha_channel = None
-    image = Image.open(io.BytesIO(img_bytes))
+    
+    if type(img_bytes) == np.ndarray:
+        image = Image.fromarray(np.uint8(img_bytes))
+    else:
+        image = Image.open(io.BytesIO(img_bytes))
 
     if return_exif:
         info = image.info or {}

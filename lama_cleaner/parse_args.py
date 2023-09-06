@@ -206,9 +206,14 @@ def parse_args():
             import torch
 
             if torch.cuda.is_available() is False:
-                parser.error(
-                    "torch.cuda.is_available() is False, please use --device cpu or check your pytorch installation"
-                )
+                # print('hohoho')
+                parser._print_message("torch.cuda.is_available() is False, please use --device cpu or check your pytorch installation")
+                raise Exception("start without args")
+                
+                # parser.error(
+                #     "torch.cuda.is_available() is False, please use --device cpu or check your pytorch installation"
+                # )
+
 
     if args.sd_local_model_path and args.model == "sd1.5":
         if not os.path.exists(args.sd_local_model_path):
