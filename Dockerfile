@@ -12,9 +12,8 @@ RUN pip install --upgrade pip && \
 RUN git clone https://github.com/hk2281/lama-cleaner.git
 
 RUN cd lama-cleaner
-RUN pip install .
+RUN pip install lama-cleaner/.
 
 FROM builder AS final
 
-ENV HG_TOKEN=
-CMD ['python','main.py']
+CMD ['python', 'main.py']
