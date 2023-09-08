@@ -218,19 +218,131 @@ def media_thumbnail_file(tab, filename):
     response = make_response(send_file(thumb_filepath))
     response.headers["X-Width"] = str(width)
     response.headers["X-Height"] = str(height)
+    return 
+    
+@app.route("/in", methods=["POST"])
+def te():
+    input = []
+    k = request.get_data()
+    bytes_io = io.BytesIO(request.data)
+    image = Image.open(bytes_io)    
+    arr = np.array(image)
+    image = arr
+    alpha_channel = None
+
+    try:
+        factored_mask = get_mask(image,YOLO_model)
+        print('factored', factored_mask)
+    except AttributeError as e:
+        logger.exception(e)
+        return f"cant find bamper watermask {str(e)}", 500
+    
+
+    mask, _ = load_img(factored_mask, gray=True)
+    mask = cv2.threshold(mask, 127, 255, cv2.THRESH_BINARY)[1]
+    
+
+    if image.shape[:2] != mask.shape[:2]:
+        return (
+            f"Mask shape{mask.shape[:2]} not queal to Image shape{image.shape[:2]}",
+            400,
+        )
+
+    original_shape = image.shape
+    interpolation = cv2.INTER_CUBIC
+
+    with open('config.pkl','rb') as conf:
+        config = pickle.load(conf)
+
+    size_limit = max(image.shape)
+
+    if "paintByExampleImage" in input:
+        paint_by_example_example_image, _ = load_img(
+            input["paintByExampleImage"].read()
+        )
+        paint_by_example_example_image = Image.fromarray(paint_by_example_example_image)
+    else:
+        paint_by_example_example_image = None
+
+    if config.sd_seed == -1:
+        config.sd_seed = random.randint(1, 999999999)
+    if config.paint_by_example_seed == -1:
+        config.paint_by_example_seed = random.randint(1, 999999999)
+
+    logger.info(f"Origin image shape: {original_shape}")
+    image = resize_max_size(image, size_limit=size_limit, interpolation=interpolation)
+
+    mask = resize_max_size(mask, size_limit=size_limit, interpolation=interpolation)
+
+    start = time.time()
+    try:
+        res_np_img = model(image, mask, config)
+    except RuntimeError as e:
+        if "CUDA out of memory. " in str(e):
+            # NOTE: the string may change?
+            return "CUDA out of memory", 500
+        else:
+            logger.exception(e)
+            return f"{str(e)}", 500
+    finally:
+        logger.info(f"process time: {(time.time() - start) * 1000}ms")
+        torch_gc()
+
+    res_np_img = cv2.cvtColor(res_np_img.astype(np.uint8), cv2.COLOR_BGR2RGB)
+    if alpha_channel is not None:
+        if alpha_channel.shape[:2] != res_np_img.shape[:2]:
+            alpha_channel = cv2.resize(
+                alpha_channel, dsize=(res_np_img.shape[1], res_np_img.shape[0])
+            )
+        res_np_img = np.concatenate(
+            (res_np_img, alpha_channel[:, :, np.newaxis]), axis=-1
+        )
+
+    ext = get_image_ext(request.data)
+
+    res_np_img = trim(res_np_img)
+
+    relative_path = os.path.join('lama_cleaner/watermark_img', 'wm.png')
+    res_np_img = add_watermark(
+                    target_image_path=res_np_img,
+                    watermark_image_path=cv2.imread(relative_path),
+                    opacity=30
+                    )
+
+
+    # bytes_io = io.BytesIO(
+    #     pil_to_bytes(
+    #         Image.fromarray(res_np_img),
+    #         ext,
+    #         quality=image_quality,
+    #         exif_infos=exif_infos,
+    #     )
+    # )
+    
+    response = make_response(
+        send_file(
+            io.BytesIO(numpy_to_bytes(res_np_img[..., ::-1], ext)),
+            # bytes_io,
+            mimetype=f"image/{ext}",
+        )
+    )
+    response.headers["X-Seed"] = str(config.sd_seed)
+
+    socketio.emit("diffusion_finish")
     return response
+
+
 
 
 @app.route("/inpaint", methods=["POST"])
 def process():
-    print('hi im here')
+    print('hi im here!')
     input = request.files
-    # RGB
     origin_image_bytes = input["image"].read()
-
-
+    print(type(origin_image_bytes))
     image, alpha_channel, exif_infos = load_img(origin_image_bytes, return_exif=True)
     print(type(image),type(alpha_channel))
+
     # получили изображение, построили маску отдали маску 
     # функия поличит изображение np.array и модель
     try:
@@ -301,6 +413,8 @@ def process():
         controlnet_conditioning_scale=form["controlnet_conditioning_scale"],
         controlnet_method=form["controlnet_method"],
     )
+    with open('config.pkl','wb') as conf:
+        pickle.dump(config, conf)
 
     if config.sd_seed == -1:
         config.sd_seed = random.randint(1, 999999999)
@@ -357,6 +471,8 @@ def process():
         )
     )
 
+
+    print('minetype:',f"image/{ext}")
     response = make_response(
         send_file(
             # io.BytesIO(numpy_to_bytes(res_np_img, ext)),

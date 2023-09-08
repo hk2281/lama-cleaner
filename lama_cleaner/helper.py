@@ -166,7 +166,7 @@ def add_watermark(target_image_path=None, watermark_image_path=None, output_imag
 
     # Открываем целевое и водяное изображения
     target_image = Image.fromarray(np.uint8(target_image_path))
-    print(watermark_image_path)
+    # print(watermark_image_path)
     # target_image = Image.open(target_image_path)
     watermark_image_path = watermark_image_path[..., ::-1]
     watermark_image = Image.fromarray(np.uint8(watermark_image_path))
@@ -342,7 +342,7 @@ def numpy_to_bytes(image_numpy: np.ndarray, ext: str) -> bytes:
     data = cv2.imencode(
         f".{ext}",
         image_numpy,
-        [int(cv2.IMWRITE_JPEG_QUALITY), 100, int(cv2.IMWRITE_PNG_COMPRESSION), 0],
+        [int(cv2.IMWRITE_JPEG_QUALITY), 100, int(cv2.IMWRITE_PNG_COMPRESSION), 255],
     )[1]
     image_bytes = data.tobytes()
     return image_bytes
