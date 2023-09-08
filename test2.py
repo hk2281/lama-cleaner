@@ -61,7 +61,7 @@ for index, image in enumerate(image_paths):
 
         # Отправляем POST-запрос с изображением на сервер
         # response = requests.post(url, files=files)
-        response = requests.post('http://0.0.0.0:5050/in', 
+        response = requests.post('http://0.0.0.0:5051/in', 
         cookies=cookies, 
         headers=headers,
         data=image_file)
@@ -69,6 +69,6 @@ for index, image in enumerate(image_paths):
         if response.status_code == 200:
             print(f'[OK] {index} save image with name: ', image)
             img = Image.open(BytesIO(response.content))
-            img.save(f'output/{image}')
+            img.save(f'output2/{image}')
         else:
             print('[ERROR] ',response.status_code, 'sorry')

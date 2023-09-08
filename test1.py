@@ -69,6 +69,6 @@ for index, image in enumerate(image_paths):
         if response.status_code == 200:
             print(f'[OK] {index} save image with name: ', image)
             img = Image.open(BytesIO(response.content))
-            img.save(f'output/{image}')
+            img.save(f'output1/{image}')
         else:
             print('[ERROR] ',response.status_code, 'sorry')
