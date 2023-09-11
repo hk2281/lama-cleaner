@@ -1,0 +1,9 @@
+version: '3'
+
+services:
+ bamper_wt_remover:
+  image: 'hk2281/bamp:v1'
+  environment:
+   - HG_TOKEN=
+  network_mode: host
+  restart: always
