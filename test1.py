@@ -61,7 +61,7 @@ for index, image in enumerate(image_paths):
 
         # Отправляем POST-запрос с изображением на сервер
         # response = requests.post(url, files=files)
-        response = requests.post('http://0.0.0.0:5050/in', 
+        response = requests.post('http://0.0.0.0:8080/in', 
         cookies=cookies, 
         headers=headers,
         data=image_file)

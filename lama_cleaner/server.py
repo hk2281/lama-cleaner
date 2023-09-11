@@ -235,7 +235,8 @@ def te():
         print('factored', factored_mask)
     except AttributeError as e:
         logger.exception(e)
-        return f"cant find bamper watermask {str(e)}", 500
+        factored_mask = np.zeros_like(image)
+        print(f"cant find bamper watermask {str(e)}")
     
 
     mask, _ = load_img(factored_mask, gray=True)
