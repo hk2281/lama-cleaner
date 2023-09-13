@@ -814,7 +814,7 @@ def main(args):
             width=app_width,
             height=app_height,
             host=args.host,
-            port=8081,
+            port=args.port,
             close_server_on_exit=not args.no_gui_auto_close,
         )
         ui.run()
@@ -822,7 +822,7 @@ def main(args):
         socketio.run(
             app,
             host=args.host,
-            port=8081,
+            port=args.port,
             debug=args.debug,
             allow_unsafe_werkzeug=True,
         )
