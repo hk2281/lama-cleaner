@@ -646,7 +646,7 @@ def switch_model():
     return f"ok, switch to {new_name}", 200
 
 
-@app.route("/")
+@app.route("/rem")
 def index():
     return send_file(os.path.join(BUILD_DIR, "index.html"))
 
