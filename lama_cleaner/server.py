@@ -142,6 +142,32 @@ def diffuser_callback(i, t, latents):
     socketio.emit("diffusion_progress", {"step": i})
 
 
+def get_or_create_directory(directory_path):
+
+    if type(directory_path) == list:
+        for dir_path in directory_path:
+            if not os.path.exists(dir_path):
+                try:
+                    # Создаем директорию, если она не существует
+                    os.makedirs(dir_path)
+                except OSError as e:
+                    print(f"Ошибка создания директории {dir_path}: {e}")
+                    return None
+        return directory_path
+            
+    # Проверяем, существует ли директория
+    if not os.path.exists(directory_path):
+        try:
+            # Создаем директорию, если она не существует
+            os.makedirs(directory_path)
+        except OSError as e:
+            print(f"Ошибка создания директории {directory_path}: {e}")
+            return None
+
+    # Возвращаем путь к директории
+    return directory_path
+
+
 @app.route("/save_image", methods=["POST"])
 def save_image():
     if output_dir is None:
@@ -219,7 +245,19 @@ def media_thumbnail_file(tab, filename):
     response.headers["X-Width"] = str(width)
     response.headers["X-Height"] = str(height)
     return 
+
+@app.route("/send_data", methods=["POST"])
+def recive_pickle_from_parser():
+    # print(request.headers)
+    get_or_create_directory('res')
+    file_name = request.headers.get('pkl-file-name')
+    print(file_name)
+    resived_file = request.get_data()
+    bytes_io = io.BytesIO(request.data)
     
+    with open(f'res/{file_name}','wb') as file:
+        file.write(bytes_io.read())
+
 @app.route("/in", methods=["POST"])
 def te():
     input = []
@@ -236,7 +274,7 @@ def te():
     except AttributeError as e:
         logger.exception(e)
         factored_mask = np.zeros_like(image)
-        print(f"cant find bamper watermask {str(e)}")
+        return f"cant find bamper watermask {str(e)}", 500
     
 
     mask, _ = load_img(factored_mask, gray=True)
@@ -776,7 +814,7 @@ def main(args):
             width=app_width,
             height=app_height,
             host=args.host,
-            port=args.port,
+            port=8081,
             close_server_on_exit=not args.no_gui_auto_close,
         )
         ui.run()
@@ -784,7 +822,7 @@ def main(args):
         socketio.run(
             app,
             host=args.host,
-            port=args.port,
+            port=8081,
             debug=args.debug,
             allow_unsafe_werkzeug=True,
         )
